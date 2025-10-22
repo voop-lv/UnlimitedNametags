@@ -14,6 +14,7 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.TextColor;
 import org.alexdev.unlimitednametags.UnlimitedNameTags;
 import org.alexdev.unlimitednametags.config.Settings;
+import org.alexdev.unlimitednametags.hook.HMCCosmeticsHook;
 import org.alexdev.unlimitednametags.hook.ViaVersionHook;
 import org.alexdev.unlimitednametags.packet.PacketNameTag;
 import org.bukkit.*;
@@ -26,7 +27,6 @@ import org.bukkit.util.Vector;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -78,9 +78,12 @@ public class NameTagManager {
 
         // Refresh passengers
         final MyScheduledTask passengers = plugin.getTaskScheduler().runTaskTimerAsynchronously(() ->
-                        Bukkit.getOnlinePlayers().forEach(player ->
-                                getPacketDisplayText(player)
-                                        .ifPresent(PacketNameTag::sendPassengerPacketToViewers))
+                        Bukkit.getOnlinePlayers()
+                                .stream()
+                                .filter(p -> plugin.getHook(HMCCosmeticsHook.class).map(h -> !h.hasBackpack(p)).orElse(true))
+                                .forEach(player ->
+                                        getPacketDisplayText(player)
+                                                .ifPresent(PacketNameTag::sendPassengerPacketToViewers))
                 , 20, 20 * 5L);
 
         // Scale task
@@ -344,9 +347,13 @@ public class NameTagManager {
             if (force && isScalePresent()) {
                 packetNameTag.checkScale();
             }
+
+            final boolean shadowed = nameTag.background().shadowed();
+            final boolean seeThrough = nameTag.background().seeThrough();
+            final int backgroundColor = nameTag.background().getColor().asARGB();
+
             components.forEach((p, c) -> {
-                final AtomicBoolean update = new AtomicBoolean(false);
-                update.set(packetNameTag.text(p, c) || force);
+                final boolean[] updateRef = {packetNameTag.text(p, c) || force};
                 final User user = PacketEvents.getAPI().getPlayerManager().getUser(p);
                 if (user == null) {
                     return;
@@ -354,25 +361,24 @@ public class NameTagManager {
                 packetNameTag.modify(user, m -> {
 
                     if (force) {
-                        m.setShadow(nameTag.background().shadowed());
-                        m.setSeeThrough(nameTag.background().seeThrough());
-                        m.setBackgroundColor(nameTag.background().getColor().asARGB());
-                        update.set(true);
+                        m.setShadow(shadowed);
+                        m.setSeeThrough(seeThrough);
+                        m.setBackgroundColor(backgroundColor);
                     } else {
-                        if (m.isShadow() != nameTag.background().shadowed()) {
-                            m.setShadow(nameTag.background().shadowed());
-                            update.set(true);
+                        if (m.isShadow() != shadowed) {
+                            m.setShadow(shadowed);
+                            updateRef[0] = true;
                         }
-                        if (!sneaking.contains(player.getUniqueId()) && m.isSeeThrough() != nameTag.background().seeThrough()) {
-                            m.setSeeThrough(nameTag.background().seeThrough());
-                            update.set(true);
+                        if (m.isSeeThrough() != seeThrough) {
+                            m.setSeeThrough(seeThrough);
+                            updateRef[0] = true;
                         }
                     }
 
 
                 });
 
-                if (update.get()) {
+                if (updateRef[0]) {
                     packetNameTag.refreshForPlayer(p);
                 }
             });
@@ -491,7 +497,9 @@ public class NameTagManager {
             if (packetNameTag.getNameTag().background().seeThrough()) {
                 packetNameTag.setSeeThrough(!isSneaking);
             }
-            packetNameTag.setTextOpacity((byte) (isSneaking ? plugin.getConfigManager().getSettings().getSneakOpacity() : -1));
+
+            packetNameTag.setSneaking(sneaking);
+            packetNameTag.setTextOpacity((byte) (sneaking ? plugin.getConfigManager().getSettings().getSneakOpacity() : -1));
             packetNameTag.refresh();
         });
     }

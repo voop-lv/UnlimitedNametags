@@ -26,7 +26,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @Getter
 public class PlaceholderManager {
@@ -51,7 +50,6 @@ public class PlaceholderManager {
     private int index = maxIndex;
     private int mmIndex = maxMIndex;
     private DecimalFormat decimalFormat;
-    private UntPapiExpansion untPapiExpansion;
 
     private BigDecimal miniGradientIndexBD = new BigDecimal("-1.0");
     private final BigDecimal stepBD = new BigDecimal("0.1");
@@ -91,7 +89,7 @@ public class PlaceholderManager {
     private void reloadPlaceholdersReplacements() {
         placeholdersReplacements.clear();
         plugin.getConfigManager().getSettings().getPlaceholdersReplacements().forEach((key, value) -> {
-            final Map<String, String> replacements = Maps.newHashMap();
+            final Map<String, String> replacements = Maps.newHashMapWithExpectedSize(value.size());
             value.forEach((pr) -> replacements.put(pr.placeholder().toLowerCase(Locale.ROOT), pr.replacement()));
             placeholdersReplacements.put(key.toLowerCase(Locale.ROOT), replacements);
         });
@@ -114,7 +112,7 @@ public class PlaceholderManager {
         plugin.getTaskScheduler().runTaskTimerAsynchronously(() -> {
             index -= 1;
             if (index == 0) {
-                index = 16777215;
+                index = maxIndex;
             }
         }, 0, 1);
         plugin.getTaskScheduler().runTaskTimerAsynchronously(() -> {
@@ -122,11 +120,11 @@ public class PlaceholderManager {
             if (mmIndex == 1) {
                 mmIndex = maxMIndex;
             }
-        }, 0, 2);
+        }, 0, 1);
         plugin.getTaskScheduler().runTaskTimerAsynchronously(() -> {
             miniGradientIndexBD = miniGradientIndexBD.add(stepBD);
             if (miniGradientIndexBD.compareTo(one) > 0) {
-                miniGradientIndexBD = new BigDecimal("-1.0");
+                miniGradientIndexBD = minusOne;
             }
 
             updateFormattedPhaseValues();
@@ -155,16 +153,14 @@ public class PlaceholderManager {
 
     public void close() {
         this.executorService.shutdown();
-        if (this.papiManager.isPapiEnabled() && this.untPapiExpansion != null) {
-            this.untPapiExpansion.unregister();
-        }
+        papiManager.close();
     }
 
 
     @NotNull
     public CompletableFuture<Map<Player, Component>> applyPlaceholders(@NotNull Player player, @NotNull List<Settings.LinesGroup> lines,
                                                                        @NotNull List<Player> relationalPlayers) {
-        return getCheckedLines(player, lines).thenApply(strings -> createComponent(player, strings, relationalPlayers));
+        return getCheckedLines(player, lines).thenApplyAsync(strings -> createComponent(player, strings, relationalPlayers), executorService);
     }
 
     @NotNull
@@ -194,39 +190,46 @@ public class PlaceholderManager {
         }
 
         final Component hatLines = emptyLines;
+        final Settings settings = plugin.getConfigManager().getSettings();
+        final boolean removeEmptyLines = settings.isRemoveEmptyLines();
+        final boolean enableRelationalPlaceholders = settings.isEnableRelationalPlaceholders();
+
         final List<String> baseStrings = papiManager.isPapiEnabled() ?
                 strings.stream()
                         .map(s -> replacePlaceholders(s, player, null))
                         .toList()
                 : strings;
 
-        if (plugin.getConfigManager().getSettings().isEnableRelationalPlaceholders()) {
-            return relationalPlayers.stream()
-                    .map(viewer -> {
-                        List<Component> processedLines = baseStrings.stream()
-                                .map(line -> replacePlaceholders(line, player, viewer))
-                                .filter(s -> !plugin.getConfigManager().getSettings().isRemoveEmptyLines() || !s.isEmpty())
-                                .map(this::formatPhases)
-                                .map(line -> format(line, player))
-                                .filter(c -> !plugin.getConfigManager().getSettings().isRemoveEmptyLines() || !c.equals(Component.empty()))
-                                .toList();
-                        Component finalComponent = joinLines(processedLines).append(hatLines);
-                        return Map.entry(viewer, finalComponent);
-                    })
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        if (enableRelationalPlaceholders) {
+            final Map<Player, Component> result = Maps.newHashMapWithExpectedSize(relationalPlayers.size());
+            for (Player viewer : relationalPlayers) {
+                List<Component> processedLines = baseStrings.stream()
+                        .map(line -> replacePlaceholders(line, player, viewer))
+                        .filter(s -> !removeEmptyLines || !s.isEmpty())
+                        .map(this::formatPhases)
+                        .map(line -> format(line, player))
+                        .filter(c -> !removeEmptyLines || !c.equals(Component.empty()))
+                        .toList();
+                Component finalComponent = joinLines(processedLines).append(hatLines);
+                result.put(viewer, finalComponent);
+            }
+            return result;
         } else {
             List<Component> processedLines = baseStrings.stream()
                     .map(line -> replacePlaceholders(line, player, null))
-                    .filter(s -> !plugin.getConfigManager().getSettings().isRemoveEmptyLines() || !s.isEmpty())
+                    .filter(s -> !removeEmptyLines || !s.isEmpty())
                     .map(this::formatPhases)
                     .map(line -> format(line, player))
-                    .filter(c -> !plugin.getConfigManager().getSettings().isRemoveEmptyLines() || !c.equals(Component.empty()))
+                    .filter(c -> !removeEmptyLines || !c.equals(Component.empty()))
                     .toList();
 
             Component finalComponent = joinLines(processedLines).append(hatLines);
-            return relationalPlayers.stream()
-                    .map(viewer -> Map.entry(viewer, finalComponent))
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+            final Map<Player, Component> result = Maps.newHashMapWithExpectedSize(relationalPlayers.size());
+            for (Player viewer : relationalPlayers) {
+                result.put(viewer, finalComponent);
+            }
+            return result;
         }
     }
 
@@ -234,15 +237,28 @@ public class PlaceholderManager {
         return Component.join(JOIN_CONFIGURATION, lines);
     }
 
-
     @NotNull
     private String formatPhases(@NotNull String value) {
-        return value.replace("#phase-mm-g#", formattedPhaseValues.getOrDefault(PHASE_MM_G_KEY, ""))
-                .replace("#-phase-mm-g#", formattedPhaseValues.getOrDefault(NEG_PHASE_MM_G_KEY, ""))
-                .replace("#phase-md#", formattedPhaseValues.getOrDefault(PHASE_MD_KEY, ""))
-                .replace("#phase-mm#", formattedPhaseValues.getOrDefault(PHASE_MM_KEY, ""))
-                .replace("#-phase-md#", formattedPhaseValues.getOrDefault(NEG_PHASE_MD_KEY, ""))
-                .replace("#-phase-mm#", formattedPhaseValues.getOrDefault(NEG_PHASE_MM_KEY, ""));
+        if (value.indexOf('#') == -1) {
+            return value;
+        }
+
+        String result = value.replace("#phase-mm-g#", formattedPhaseValues.getOrDefault(PHASE_MM_G_KEY, ""));
+        if (result.indexOf('#') == -1) return result;
+
+        result = result.replace("#-phase-mm-g#", formattedPhaseValues.getOrDefault(NEG_PHASE_MM_G_KEY, ""));
+        if (result.indexOf('#') == -1) return result;
+
+        result = result.replace("#phase-md#", formattedPhaseValues.getOrDefault(PHASE_MD_KEY, ""));
+        if (result.indexOf('#') == -1) return result;
+
+        result = result.replace("#phase-mm#", formattedPhaseValues.getOrDefault(PHASE_MM_KEY, ""));
+        if (result.indexOf('#') == -1) return result;
+
+        result = result.replace("#-phase-md#", formattedPhaseValues.getOrDefault(NEG_PHASE_MD_KEY, ""));
+        if (result.indexOf('#') == -1) return result;
+
+        return result.replace("#-phase-mm#", formattedPhaseValues.getOrDefault(NEG_PHASE_MM_KEY, ""));
     }
 
     @NotNull
@@ -271,7 +287,7 @@ public class PlaceholderManager {
             return string;
         }
 
-        final StringBuilder builder = new StringBuilder(string.length());
+        final StringBuilder builder = new StringBuilder(string.length() + 32); // Pre-allocate extra space
         final Matcher matcher = PLACEHOLDER_PATTERN.matcher(string);
         int lastAppendPosition = 0;
 
@@ -285,7 +301,7 @@ public class PlaceholderManager {
             lastAppendPosition = matcher.end();
         }
 
-        builder.append(string.substring(lastAppendPosition));
+        builder.append(string, lastAppendPosition, string.length());
 
         final String intermediateResult = builder.toString();
 
