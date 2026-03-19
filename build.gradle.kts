@@ -5,7 +5,6 @@ plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.0.0"
     id("xyz.jpenilla.run-paper") version "2.3.1"
-//    id("com.github.gmazzo.buildconfig") version "5.6.7"
 }
 
 group = "org.alexdev"
@@ -24,18 +23,20 @@ repositories {
     maven("https://repo.codemc.io/repository/maven-snapshots/")
     maven("https://repo.codemc.io/repository/maven-releases/")
     maven("https://repo.viaversion.com/")
+    maven("https://maven.pvphub.me/#/tofaa/io/github/tofaa2/")
     maven("https://repo.opencollab.dev/main/")
     maven("https://s01.oss.sonatype.org/content/repositories/snapshots/")
     maven("https://repo.oraxen.com/releases")
     maven("https://repo.oraxen.com/snapshots")
     maven("https://jitpack.io")
     maven("https://repo.viaversion.com")
-    maven("https://maven.evokegames.gg/snapshots")
-    maven("https://repo.alessiodp.com/releases")
+    //maven("https://maven.evokegames.gg/snapshots")
+    maven("https://repo.alessiodp.com/snapshots/")
     maven("https://maven.typewritermc.com/beta")
     maven("https://repo.nexomc.com/snapshots/")
     maven("https://repo.nexomc.com/releases")
     maven("https://repo.md-5.net/content/groups/public/")
+    maven("https://mvn.lib.co.nz/public")
     maven {
         name = "feather-repo"
         url = uri("https://repo.feathermc.net/artifactory/maven-releases")
@@ -45,6 +46,7 @@ repositories {
         url = uri("https://dist.labymod.net/api/v1/maven/release/")
     }
     maven("https://repo.hibiscusmc.com/releases")
+    maven("https://maven.pvphub.me/tofaa")
 }
 
 dependencies {
@@ -79,7 +81,6 @@ dependencies {
     compileOnly(libs.libs.disguises)
     compileOnly(libs.hmcCosmetics)
 
-    implementation(libs.minedownAdventure)
     implementation(libs.drink)
     implementation(libs.universalScheduler)
     implementation(libs.libbyBukkit)
@@ -168,9 +169,11 @@ tasks.jar {
     }
 }
 
+
+
 tasks {
     runServer {
-        minecraftVersion("1.21.8")
+        minecraftVersion("1.21.11")
 
         downloadPlugins {
             hangar("PlaceholderAPI", "2.11.6")
@@ -178,18 +181,18 @@ tasks {
             modrinth("multiverse-core", "4.3.14")
             github("MiniPlaceholders", "MiniPlaceholders", "3.0.1", "MiniPlaceholders-Paper-3.0.1.jar")
 //            github("retrooper", "packetevents", "v2.9.4", "packetevents-spigot-2.9.4.jar")
-            url("https://ci.codemc.io/job/retrooper/job/packetevents/770/artifact/build/libs/packetevents-spigot-2.10.0-SNAPSHOT.jar")
+            url("https://ci.codemc.io/job/retrooper/job/packetevents/796/artifact/build/libs/packetevents-spigot-2.11.1-SNAPSHOT.jar")
             github("MilkBowl", "Vault", "1.7.3", "Vault.jar")
             github("FeatherMC", "feather-server-api", "v0.0.5", "feather-server-api-0.0.5-bukkit.jar")
             github("LabyMod", "labymod4-server-api", "1.0.6", "labymod-server-api-bukkit-1.0.6.jar")
         }
     }
     runPaper.folia.registerTask {
-        minecraftVersion("1.21.6")
+        minecraftVersion("1.21.11")
 
         downloadPlugins {
             github("Anon8281", "PlaceholderAPI", "2.11.7", "PlaceholderAPI-2.11.7-DEV-Folia.jar")
-            url("https://ci.codemc.io/job/retrooper/job/packetevents/lastSuccessfulBuild/artifact/spigot/build/libs/packetevents-spigot-2.9.4-SNAPSHOT.jar")
+            url("https://ci.codemc.io/job/retrooper/job/packetevents/796/artifact/build/libs/packetevents-spigot-2.11.1-SNAPSHOT.jar")
             github("ViaVersion", "ViaVersion", "5.4.1", "ViaVersion-5.4.1.jar")
         }
     }
@@ -221,19 +224,3 @@ tasks.processResources {
     }
 
 }
-
-//buildConfig {
-//    className.set("LibVersions")
-//
-//    packageName.set("org.alexdev.unlimitednametags.config")
-//
-//    buildConfigField(
-//        "String",
-//        "CONFIG_LIB_VERSION",
-//        "\"${libs.versions.configlibVersion.get()}\""
-//    )
-//
-//    buildConfigField("String", "APP_VERSION", "\"$version\"")
-//
-//    buildConfigField("int", "MAX_RETRIES", "5")
-//}

@@ -21,12 +21,12 @@ import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.alexdev.unlimitednametags.UnlimitedNameTags;
 import org.alexdev.unlimitednametags.config.Settings;
 import org.alexdev.unlimitednametags.hook.ViaVersionHook;
-import org.bukkit.Bukkit;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
 import java.util.function.Consumer;
@@ -43,6 +43,9 @@ public class PacketNameTag {
     private final Set<UUID> blocked;
     @NotNull
     private final Map<UUID, Component> relationalCache;
+    private final Map<UUID, Component> calculatedTextCache = Maps.newConcurrentMap();
+    private final Map<UUID, Component> forcedRelationalText = Maps.newConcurrentMap();
+    private volatile Component forcedGlobalText = null;
     private long lastUpdate;
     @Setter
     private boolean visible;
@@ -51,7 +54,7 @@ public class PacketNameTag {
     private float scale;
     private float offset;
     private float increasedOffset;
-    private boolean removed;
+    private volatile boolean removed;
     @Setter
     private boolean sneaking;
 
@@ -84,6 +87,16 @@ public class PacketNameTag {
             return false;
         }
 
+        calculatedTextCache.put(player.getUniqueId(), text);
+
+        if (forcedRelationalText.containsKey(player.getUniqueId()) || forcedGlobalText != null) {
+            return false;
+        }
+
+        return applyText(player, text);
+    }
+
+    private boolean applyText(@NotNull Player player, @NotNull Component text) {
         if (text.equals(relationalCache.get(player.getUniqueId()))) {
             return false;
         }
@@ -99,7 +112,7 @@ public class PacketNameTag {
         return true;
     }
 
-    public void modify(User user, Consumer<TextDisplayMeta> consumer) {
+    public void modify(@Nullable User user, @NotNull Consumer<TextDisplayMeta> consumer) {
         if (removed) {
             return;
         }
@@ -114,7 +127,7 @@ public class PacketNameTag {
         });
     }
 
-    public void modifyOwner(Consumer<TextDisplayMeta> consumer) {
+    public void modifyOwner(@NotNull Consumer<TextDisplayMeta> consumer) {
         if (removed) {
             return;
         }
@@ -127,7 +140,7 @@ public class PacketNameTag {
         modify(owner, consumer);
     }
 
-    public void modifyOwnerEntity(Consumer<WrapperEntity> consumer) {
+    public void modifyOwnerEntity(@NotNull Consumer<WrapperEntity> consumer) {
         if (removed) {
             return;
         }
@@ -140,7 +153,7 @@ public class PacketNameTag {
         modifyEntity(owner, consumer);
     }
 
-    public void modify(Consumer<TextDisplayMeta> consumer) {
+    public void modify(@NotNull Consumer<TextDisplayMeta> consumer) {
         if (removed) {
             return;
         }
@@ -151,7 +164,7 @@ public class PacketNameTag {
         });
     }
 
-    public void modifyEntity(User user, Consumer<WrapperEntity> consumer) {
+    public void modifyEntity(@Nullable User user, @NotNull Consumer<WrapperEntity> consumer) {
         if (removed) {
             return;
         }
@@ -159,7 +172,7 @@ public class PacketNameTag {
         perPlayerEntity.modify(user, consumer);
     }
 
-    public void modifyEntity(Consumer<WrapperEntity> consumer) {
+    public void modifyEntity(@NotNull Consumer<WrapperEntity> consumer) {
         if (removed) {
             return;
         }
@@ -233,13 +246,17 @@ public class PacketNameTag {
     public void showToPlayer(@NotNull Player player) {
         if (!isEligibleToShow(player)) {
             if (plugin.getNametagManager().isDebug()) {
-                plugin.getLogger().info("Player " + player.getName() + " is not eligible to show nametag for " + owner.getName());
+                plugin.getLogger()
+                        .info("Player " + player.getName() + " is not eligible to show nametag for " + owner.getName());
             }
             return;
         }
 
         if (!player.getUniqueId().equals(owner.getUniqueId())) {
-            applyOwnerData(perPlayerEntity.getEntityOf(getUser(player)));
+            WrapperEntity entity = perPlayerEntity.getEntityOf(getUser(player));
+            if (entity != null) {
+                applyOwnerData(entity);
+            }
         }
 
         spawn(player);
@@ -251,6 +268,8 @@ public class PacketNameTag {
         }
 
         perPlayerEntity.addViewer(getUser(player));
+
+        updateViewer(player.getUniqueId());
 
         plugin.getTaskScheduler().runTaskLaterAsynchronously(() -> {
             final User user = getUser(player);
@@ -264,46 +283,86 @@ public class PacketNameTag {
 
     private boolean isEligibleToShow(@NotNull Player player) {
         if (!visible) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger().info("Nametag is not visible for " + owner.getName());
+            }
             return false;
         }
 
         if (plugin.getHook(ViaVersionHook.class).map(h -> h.hasNotTextDisplays(player)).orElse(false)) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger()
+                        .info("Player " + player.getName() + " is on a version that does not support text displays.");
+            }
             return false;
         }
 
         if (blocked.contains(player.getUniqueId())) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger()
+                        .info("Player " + player.getName() + " is blocked from seeing nametag of " + owner.getName());
+            }
             return false;
         }
 
         if (!player.canSee(owner)) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger().info("Player " + player.getName() + " cannot see owner " + owner.getName());
+            }
             return false;
         }
 
         if (player.getWorld() != owner.getWorld()) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger()
+                        .info("Player " + player.getName() + " is in a different world than owner " + owner.getName());
+            }
             return false;
         }
 
         if (isPlayerChannelNotValid(player) || isPlayerChannelNotValid(owner)) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger().info("Player " + player.getName() + " or owner " + owner.getName()
+                        + " has an invalid channel/user.");
+            }
             return false;
         }
 
         if (!hasRequiredPermissions(player)) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger().info("Player " + player.getName()
+                        + " does not have required permissions to see nametag of " + owner.getName());
+            }
             return false;
         }
 
         if (plugin.getNametagManager().isHiddenOtherNametags(player)) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger().info("Player " + player.getName() + " has other nametags hidden.");
+            }
             return false;
         }
 
         if (plugin.getConfigManager().getSettings().isShowWhileLooking() &&
                 !plugin.getNametagManager().isPlayerPointingAt(player, owner)) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger().info("Player " + player.getName() + " is not looking at owner " + owner.getName());
+            }
             return false;
         }
 
-        if (plugin.getConfigManager().getSettings().isShowCurrentNameTag() && player.getUniqueId() == owner.getUniqueId()) {
+        if (plugin.getConfigManager().getSettings().isShowCurrentNameTag()
+                && player.getUniqueId() == owner.getUniqueId()) {
+            if (plugin.getNametagManager().isDebug()) {
+                plugin.getLogger()
+                        .info("Player " + player.getName() + " is the owner and show current nametag is enabled.");
+            }
             return true;
         }
 
+        if (plugin.getNametagManager().isDebug() && !getViewers().contains(player.getUniqueId())) {
+            plugin.getLogger().info("Player " + player.getName() + " is eligible to see nametag of " + owner.getName());
+        }
         return !getViewers().contains(player.getUniqueId());
     }
 
@@ -321,7 +380,7 @@ public class PacketNameTag {
     }
 
     private boolean hasRequiredPermissions(@NotNull Player player) {
-        boolean isOwner = isOwner(player);
+        final boolean isOwner = isOwner(player);
         if (!isOwner && !player.hasPermission("unt.shownametags")) {
             return false;
         }
@@ -350,6 +409,9 @@ public class PacketNameTag {
     }
 
     public void sendPassengersPacket(@NotNull User player) {
+        if (removed) {
+            return;
+        }
         plugin.getPacketManager().sendPassengersPacket(player, this);
     }
 
@@ -359,7 +421,7 @@ public class PacketNameTag {
         }
 
         getViewers().forEach(u -> {
-            final Player player = Bukkit.getPlayer(u);
+            final Player player = plugin.getPlayerListener().getPlayer(u);
             if (player == null) {
                 return;
             }
@@ -376,15 +438,15 @@ public class PacketNameTag {
     }
 
     private void setOwnerPosition() {
-        final Location location = getOffsetLocation(); //.add(0, 0.25, 0)
+        final Location location = getOffsetLocation(); // .add(0, 0.25, 0)
         modifyOwnerEntity(meta -> meta.setLocation(SpigotConversionUtil.fromBukkitLocation(location)));
     }
 
     public Location getOffsetLocation() {
-        final Location location = owner.getLocation().clone();
+        final Location location = owner.getLocation();
         location.setPitch(0);
         location.setYaw(-180);
-        location.setY(location.getY() + (1.8) * scale );
+        location.setY(location.getY() + (1.8) * scale);
         return location;
     }
 
@@ -406,13 +468,14 @@ public class PacketNameTag {
 
         }
         relationalCache.remove(player.getUniqueId());
+        calculatedTextCache.remove(player.getUniqueId());
 
         plugin.getPacketManager().removePassenger(player, entityId);
     }
 
     public void clearViewers() {
         getViewers().forEach(u -> {
-            final Player player = Bukkit.getPlayer(u);
+            final Player player = plugin.getPlayerListener().getPlayer(u);
             if (player != null) {
                 hideFromPlayer(player);
             }
@@ -430,6 +493,7 @@ public class PacketNameTag {
         }
         perPlayerEntity.getEntities().remove(player.getUniqueId());
         relationalCache.remove(player.getUniqueId());
+        calculatedTextCache.remove(player.getUniqueId());
     }
 
     public boolean canPlayerSee(@NotNull Player player) {
@@ -448,7 +512,7 @@ public class PacketNameTag {
 
     public void refresh() {
         perPlayerEntity.getEntities().forEach((u, e) -> {
-            if(blocked.contains(u)) {
+            if (blocked.contains(u)) {
                 return;
             }
 
@@ -462,7 +526,7 @@ public class PacketNameTag {
             return;
         }
 
-        if(blocked.contains(player.getUniqueId())) {
+        if (blocked.contains(player.getUniqueId())) {
             return;
         }
 
@@ -472,7 +536,7 @@ public class PacketNameTag {
     public void remove() {
         removed = true;
         perPlayerEntity.getEntities().keySet().forEach(u -> {
-            final Player player = Bukkit.getPlayer(u);
+            final Player player = plugin.getPlayerListener().getPlayer(u);
             if (player == null) {
                 return;
             }
@@ -482,10 +546,14 @@ public class PacketNameTag {
             }
         });
 
+        perPlayerEntity.getEntities().values().forEach(WrapperEntity::remove);
         perPlayerEntity.getEntities().clear();
 
         plugin.getPacketManager().removePassenger(entityId);
         relationalCache.clear();
+        calculatedTextCache.clear();
+        forcedRelationalText.clear();
+        forcedGlobalText = null;
     }
 
     public void handleQuit(@NotNull Player player) {
@@ -516,14 +584,16 @@ public class PacketNameTag {
                 .findFirst();
         final Metadata ownerMetadata = perPlayerEntity.getEntityOf(ownerUser).getEntityMeta().getMetadata();
         metadata.copyFrom(ownerMetadata);
-        component.ifPresent(entityData -> ((TextDisplayMeta) wrapper.getEntityMeta()).setText((Component) entityData.getValue()));
+        component.ifPresent(
+                entityData -> ((TextDisplayMeta) wrapper.getEntityMeta()).setText((Component) entityData.getValue()));
         metadata.setNotifyAboutChanges(false);
     }
 
     @NotNull
     public Map<String, String> properties() {
         final Map<String, String> properties = new LinkedHashMap<>();
-        final TextDisplayMeta meta = (TextDisplayMeta) this.perPlayerEntity.getEntityOf(PacketEvents.getAPI().getPlayerManager().getUser(owner)).getEntityMeta();
+        final TextDisplayMeta meta = (TextDisplayMeta) this.perPlayerEntity
+                .getEntityOf(PacketEvents.getAPI().getPlayerManager().getUser(owner)).getEntityMeta();
         properties.put("text", MiniMessage.miniMessage().serialize(meta.getText()));
         properties.put("billboard", meta.getBillboardConstraints().name());
         properties.put("shadowed", String.valueOf(meta.isShadow()));
@@ -535,6 +605,52 @@ public class PacketNameTag {
         properties.put("increasedOffset", String.valueOf(increasedOffset));
         properties.put("viewRange", String.valueOf(meta.getViewRange()));
         return properties;
+    }
+
+    public void setForcedNameTag(@NotNull Component component) {
+        this.forcedGlobalText = component;
+        updateAllViewers();
+    }
+
+    public void setForcedNameTag(@NotNull UUID viewer, @NotNull Component component) {
+        this.forcedRelationalText.put(viewer, component);
+        updateViewer(viewer);
+    }
+
+    public void clearForcedNameTag() {
+        this.forcedGlobalText = null;
+        updateAllViewers();
+    }
+
+    public void clearForcedNameTag(@NotNull UUID viewer) {
+        this.forcedRelationalText.remove(viewer);
+        updateViewer(viewer);
+    }
+
+    private void updateAllViewers() {
+        for (final UUID uuid : getViewers()) {
+            updateViewer(uuid);
+        }
+    }
+
+    private void updateViewer(@NotNull UUID uuid) {
+        final Player player = plugin.getPlayerListener().getPlayer(uuid);
+        if (player == null)
+            return;
+
+        Component textToUse = calculatedTextCache.get(uuid);
+
+        if (forcedRelationalText.containsKey(uuid)) {
+            textToUse = forcedRelationalText.get(uuid);
+        } else if (forcedGlobalText != null) {
+            textToUse = forcedGlobalText;
+        }
+
+        if (textToUse != null) {
+            if (applyText(player, textToUse)) {
+                refreshForPlayer(player);
+            }
+        }
     }
 
     /**
