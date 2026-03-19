@@ -514,7 +514,7 @@ public class NameTagManager {
 
         getPacketDisplayText(player).ifPresent(packetNameTag -> {
             if (packetNameTag.getNameTag().background().seeThrough()) {
-                packetNameTag.setSeeThrough(!isSneaking);
+                packetNameTag.setSeeThrough(!sneaking);
             }
 
             packetNameTag.setSneaking(sneaking);

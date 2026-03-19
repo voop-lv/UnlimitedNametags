@@ -35,7 +35,6 @@ repositories {
     maven("https://maven.typewritermc.com/beta")
     maven("https://repo.nexomc.com/snapshots/")
     maven("https://repo.nexomc.com/releases")
-    maven("https://repo.md-5.net/content/groups/public/")
     maven("https://mvn.lib.co.nz/public")
     maven {
         name = "feather-repo"
@@ -54,13 +53,11 @@ dependencies {
     compileOnly(libs.paperApi)
     compileOnly(libs.adventureApi)
     implementation(libs.entityLib)
-    /*
     compileOnly(libs.typeWriter) {
         exclude(group = "io.papermc.paper") // Exclude Paper API
         exclude(group = "com.github.Tofaa2.EntityLib") // Exclude EntityLib
         exclude(group = "me.tofaa.entitylib") // Exclude EntityLib
     }
-     */
     compileOnly(libs.placeholderapi)
     compileOnly(libs.miniplaceholdersApi)
     compileOnly(libs.floodgateApi)
@@ -84,8 +81,6 @@ dependencies {
     implementation(libs.drink)
     implementation(libs.universalScheduler)
     implementation(libs.libbyBukkit)
-
-    compileOnly(fileTree("${project.rootDir}/lib") { include("*.jar") })
 
     compileOnly(libs.gson)
     compileOnly(libs.feather)
