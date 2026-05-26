@@ -366,7 +366,7 @@ public class NameTagManager {
             }
 
             final boolean shadowed = nameTag.background().shadowed();
-            final boolean seeThrough = nameTag.background().seeThrough();
+            final boolean seeThrough = nameTag.background().seeThrough() && !packetNameTag.isSneaking();
             final int backgroundColor = nameTag.background().getColor().asARGB();
 
             components.forEach((p, c) -> {
@@ -414,7 +414,7 @@ public class NameTagManager {
             display.text(player, component);
             display.setBillboard(plugin.getConfigManager().getSettings().getDefaultBillboard());
             display.setShadowed(nameTag.background().shadowed());
-            display.setSeeThrough(nameTag.background().seeThrough());
+            display.setSeeThrough(nameTag.background().seeThrough() && !display.isSneaking());
             // background color, if disabled, set to transparent
             display.setBackgroundColor(nameTag.background().getColor());
 
@@ -756,7 +756,7 @@ public class NameTagManager {
                     display.text(player, component);
                     display.setBillboard(plugin.getConfigManager().getSettings().getDefaultBillboard());
                     display.setShadowed(nameTag.background().shadowed());
-                    display.setSeeThrough(nameTag.background().seeThrough());
+                    display.setSeeThrough(nameTag.background().seeThrough() && !display.isSneaking());
                     display.setBackgroundColor(nameTag.background().getColor());
                     display.resetOffset(plugin.getConfigManager().getSettings().getYOffset());
                     display.setViewRange(plugin.getConfigManager().getSettings().getViewDistance());
