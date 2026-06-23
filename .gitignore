@@ -121,3 +121,5 @@ license.txt
 
 !/lib/**/*.jar
 !/lib/
+.claude/settings.local.json
+.vscode/settings.json
